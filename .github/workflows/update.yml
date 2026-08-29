@@ -24,18 +24,59 @@ jobs:
             "https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt" \
             --output ru-ipv4-source.txt
 
-          sed -e 's/\r$//' \
-              -e '/^[[:space:]]*#/d' \
-              -e '/^[[:space:]]*$/d' \
-              domains.txt > ru-routing.tmp
+          python3 <<'PY'
+          from ipaddress import IPv4Network
+          from pathlib import Path
+          from string import ascii_letters, digits
+          import sys
 
-          sed -e 's/\r$//' \
-              -e '/^[[:space:]]*#/d' \
-              -e '/^[[:space:]]*$/d' \
-              ru-ipv4-source.txt >> ru-routing.tmp
+          allowed = set(ascii_letters + digits + "-")
 
-          awk 'NF && !seen[$0]++' ru-routing.tmp > ru-routing.txt
-          rm -f ru-ipv4-source.txt ru-routing.tmp
+          def valid_flint_domain(value: str) -> bool:
+              if "." not in value or value[0] not in ascii_letters or len(value) > 253:
+                  return False
+              labels = value.split(".")
+              return all(
+                  1 <= len(label) <= 63
+                  and label[0] in ascii_letters + digits
+                  and label[-1] in ascii_letters + digits
+                  and set(label) <= allowed
+                  for label in labels
+              )
+
+          domains = []
+          invalid_domains = []
+          for raw in Path("domains.txt").read_text(encoding="utf-8").splitlines():
+              value = raw.strip().lower()
+              if not value or value.startswith("#"):
+                  continue
+              if valid_flint_domain(value):
+                  domains.append(value)
+              else:
+                  invalid_domains.append(value)
+
+          if invalid_domains:
+              print(
+                  "Skipped domains rejected by the Flint 2 validator: "
+                  + ", ".join(invalid_domains),
+                  file=sys.stderr,
+              )
+
+          networks = []
+          for raw in Path("ru-ipv4-source.txt").read_text(encoding="utf-8").splitlines():
+              value = raw.strip()
+              if not value or value.startswith("#"):
+                  continue
+              networks.append(str(IPv4Network(value, strict=True)))
+
+          result = list(dict.fromkeys(domains + networks))
+          Path("ru-routing.txt").write_text(
+              "\n".join(result) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          rm -f ru-ipv4-source.txt
 
       - name: Commit updated list
         shell: bash
