@@ -1,0 +1,52 @@
+name: Update RU routing list
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build ru-routing.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt" \
+            --output ru-ipv4-source.txt
+
+          sed -e 's/\r$//' \
+              -e '/^[[:space:]]*#/d' \
+              -e '/^[[:space:]]*$/d' \
+              domains.txt > ru-routing.tmp
+
+          sed -e 's/\r$//' \
+              -e '/^[[:space:]]*#/d' \
+              -e '/^[[:space:]]*$/d' \
+              ru-ipv4-source.txt >> ru-routing.tmp
+
+          awk 'NF && !seen[$0]++' ru-routing.tmp > ru-routing.txt
+          rm -f ru-ipv4-source.txt ru-routing.tmp
+
+      - name: Commit updated list
+        shell: bash
+        run: |
+          if git diff --quiet -- ru-routing.txt; then
+            echo "ru-routing.txt is already up to date"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ru-routing.txt
+          git commit -m "Update RU routing list"
+          git push
