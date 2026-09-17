@@ -3,24 +3,41 @@ name: Update RU routing list
 on:
   schedule:
     - cron: "17 3 * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - domains.txt
+      - .github/workflows/update.yml
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: ru-routing-list
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Build ru-routing.txt
         shell: bash
         run: |
           set -euo pipefail
+          trap 'rm -f ru-ipv4-source.txt' EXIT
 
           curl --fail --silent --show-error --location \
+            --retry 5 --retry-all-errors --retry-delay 5 \
+            --connect-timeout 20 --max-time 120 \
             "https://raw.githubusercontent.com/ipverse/country-ip-blocks/master/country/ru/ipv4-aggregated.txt" \
             --output ru-ipv4-source.txt
 
@@ -55,6 +72,8 @@ jobs:
               else:
                   invalid_domains.append(value)
 
+          domains = list(dict.fromkeys(domains))
+
           if invalid_domains:
               print(
                   "Skipped domains rejected by the Flint 2 validator: "
@@ -63,20 +82,33 @@ jobs:
               )
 
           networks = []
+          invalid_networks = []
           for raw in Path("ru-ipv4-source.txt").read_text(encoding="utf-8").splitlines():
               value = raw.strip()
               if not value or value.startswith("#"):
                   continue
-              networks.append(str(IPv4Network(value, strict=True)))
+              try:
+                  networks.append(str(IPv4Network(value, strict=True)))
+              except ValueError:
+                  invalid_networks.append(value)
+
+          if invalid_networks:
+              print(
+                  "The RU IP source contains invalid IPv4/CIDR entries: "
+                  + ", ".join(invalid_networks),
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
 
           result = list(dict.fromkeys(domains + networks))
+          if not result:
+              raise SystemExit("The generated routing list is empty")
+
           Path("ru-routing.txt").write_text(
               "\n".join(result) + "\n",
               encoding="utf-8",
           )
           PY
-
-          rm -f ru-ipv4-source.txt
 
       - name: Commit updated list
         shell: bash
