@@ -1066,6 +1066,7 @@ universarium.org
 stepik.org
 vuzopedia.ru
 postupi.online
+aeza.ru
 2.56.24.0/22
 2.56.88.0/22
 2.56.180.0/22
